@@ -25,12 +25,12 @@ class ViewController: UIViewController {
         \,\mathrm{d}\xi
         """#
     ]
-
-    lazy var katexView : KatexView = {
-        let katexView = KatexView(latex: latexs[5],  options: [.displayMode: true, .macros: [#"\RR"#: #"\mathbb{R}"#, #"\f"#: #"#1f(#2)"#]])
-        katexView.backgroundColor = .darkGray
-        katexView.customCss = ".katex { color: white; }"
-        return katexView
+    
+    lazy var imageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.backgroundColor = .red
+        imageView.contentMode = .scaleAspectFit
+        return imageView
     }()
     
     lazy var textView : UITextView = {
@@ -49,7 +49,6 @@ class ViewController: UIViewController {
     lazy var modeSwitch : UISwitch = {
         let modeSwitch = UISwitch()
         modeSwitch.addTarget(self, action: #selector(switchAction(_:)), for: .valueChanged)
-        modeSwitch.isOn = katexView.displayMode
         return modeSwitch
     }()
     
@@ -58,46 +57,91 @@ class ViewController: UIViewController {
     lazy var errorLabel = UILabel()
 
     var cancellables = [AnyCancellable]()
+    
+    var katexArray: [KatexView] = []
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.addSubview(katexView)
+//        view.addSubview(katexView)
         view.addSubview(textView)
         view.addSubview(modeSwitch)
         view.addSubview(displayModeLabel)
         view.addSubview(errorLabel)
-        displayModeLabel.text = "Display Mode"
-        displayModeLabel.textAlignment = .center
-        textView.text = katexView.latex
-        errorLabel.lineBreakMode = .byWordWrapping
-        errorLabel.numberOfLines = 0
-        errorLabel.text = ""
-        katexView.$status.sink { [weak self] (status) in
-            switch status {
-            case .error(let message):
-                self?.errorLabel.text = "error: \(message)"
-                self?.view.setNeedsLayout()
-            case .finished:
-                self?.errorLabel.text = ""
-                self?.view.setNeedsLayout()
-            default:
-                break
-            }
-        }.store(in: &cancellables)
-    }
-
-    override func viewWillLayoutSubviews() {
-        view.backgroundColor = .gray
+        view.addSubview(imageView)
         modeSwitch.backgroundColor = .white
         displayModeLabel.backgroundColor = .white
         displayModeLabel.textColor = .black
-        katexView.frame = CGRect(x: 0, y: 100, width: min(katexView.intrinsicContentSize.width, UIScreen.main.bounds.width), height: min(katexView.intrinsicContentSize.height, 200))
+        
+        for index in 1...10 {
+            lazy var katexView : KatexView = {
+                var defaultConfig = KatexViewConfig.defaultConfig()
+//                defaultConfig.maxWidth = 300
+//                defaultConfig.takeSnapshotCompletion = { [weak self] image in
+//                    self?.handleImage(image)
+//                }
+                let katexView = KatexView(config: defaultConfig, latex: latexs[5])
+                katexView.maxWidth = 300
+                katexView.takeSnapshotCompletion = { [weak self] image in
+                    self?.handleImage(image)
+                }
+                return katexView
+            }()
+            katexArray.append(katexView)
+        }
+        
+//        katexView.frame = CGRect(x: 0, y: 100, width: 300, height: 200)
+//        print(katexView.frame)
+//        print("begin:\(Date().timeIntervalSince1970)")
         textView.frame = CGRect(x:0, y: 310, width: UIScreen.main.bounds.width, height: 200)
         displayModeLabel.sizeToFit()
         displayModeLabel.frame = CGRect(x: 0, y: 520, width: displayModeLabel.frame.width + 20, height: modeSwitch.frame.height)
         modeSwitch.frame.origin = CGPoint(x: displayModeLabel.frame.width, y: 520)
         errorLabel.frame.origin = CGPoint(x: 0, y: 530 + modeSwitch.frame.height)
         errorLabel.frame.size = errorLabel.sizeThatFits(UIScreen.main.bounds.size)
+        imageView.frame = CGRect(x: 50, y: modeSwitch.frame.maxY, width: 300, height: 200)
+        displayModeLabel.text = "Display Mode"
+        displayModeLabel.textAlignment = .center
+//        textView.text = katexView.latex
+        errorLabel.lineBreakMode = .byWordWrapping
+        errorLabel.numberOfLines = 0
+        errorLabel.text = ""
+//        katexView.$status.sink { [weak self] (status) in
+//            guard let self else { return }
+//            switch status {
+//            case .error(let message):
+//                errorLabel.text = "error: \(message)"
+//                view.setNeedsLayout()
+//            case .finished:
+//                errorLabel.text = ""
+//                view.setNeedsLayout()
+//                print("end:\(Date().timeIntervalSince1970)")
+////                let size = CGSize(width: min(katexView.intrinsicContentSize.width, UIScreen.main.bounds.width), height: min(katexView.intrinsicContentSize.height, 200))
+////                katexView.frame = CGRect(x: 0, y: 100, width: min(katexView.intrinsicContentSize.width, UIScreen.main.bounds.width), height: min(katexView.intrinsicContentSize.height, 200))
+////                let image = katexView.snapshotImage()
+////                imageView.image = image
+//            default:
+//                break
+//            }
+//        }.store(in: &cancellables)
+//        print(katexView.frame)
+    }
+
+//    override func viewWillLayoutSubviews() {
+//        super.viewWillLayoutSubviews()
+//        view.backgroundColor = .gray
+//        
+////        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+////            guard let self else { return }
+////            let image = katexView.snapshotImage()
+////            imageView.image = image
+////        }
+////        DispatchQueue.main.asyncAfter(deadline: <#T##DispatchTime#>, execute: <#T##DispatchWorkItem#>) { [weak self] in
+////
+////        }
+//    }
+    
+    func handleImage(_ image: UIImage?) {
+        imageView.image = image
     }
 
     override func didReceiveMemoryWarning() {
@@ -109,13 +153,16 @@ class ViewController: UIViewController {
 
 extension ViewController : UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) {
-        katexView.latex = textView.text
+        let text: String = textView.text ?? ""
+        print("begin:\(Date().timeIntervalSince1970)")
+//        katexView.latex = text
+        katexArray.forEach { $0.latex = text }
     }
 }
 
 
 extension ViewController {
     @objc func switchAction(_ modeSwitch: UISwitch) {
-        katexView.displayMode = modeSwitch.isOn
+//        katexView.displayMode = modeSwitch.isOn
     }
 }

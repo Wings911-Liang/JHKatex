@@ -17,223 +17,156 @@ public final class KatexView : UIView {
         case idle
         case error(message: String)
     }
-
-    @Published
+    
+//    @Published
     public var status: KatexViewStatus = .idle
-
+    
     public var latex: String = "" {
         didSet {
             reload()
         }
     }
+    
+    public var maxWidth: CGFloat = 0.0
 
-    public override var intrinsicContentSize: CGSize {
-        katexWebView.intrinsicContentSize
-    }
-
-    private var cancellables = [AnyCancellable]()
+    public var takeSnapshotCompletion: ((UIImage?) -> Void)?
     
-    private var _maxSize: CGSize = UIScreen.main.bounds.size
-    
-    public var maxSize: CGSize {
-        get {
-            CGSize(width: max(frame.size.width, _maxSize.width), height: max(frame.size.height, _maxSize.height))
-        }
-        set {
-            if _maxSize == newValue {
-                return
-            }
-            _maxSize = newValue
-            reload()
-        }
-    }
-    
-    public var options = [Katex.Key : Any]() {
-        didSet {
-            reload()
-        }
-    }
-    
-    public var displayMode : Bool {
-        get {
-            guard let displayMode = options[.displayMode] as? Bool else {
-                return false
-            }
-            return displayMode
-        }
-        set {
-            options[.displayMode] = newValue
-        }
-    }
-    
-    public var customCss : String? = nil {
-        didSet {
-            reload()
-        }
-    }
+    public var config: KatexViewConfig!
 
     private lazy var katexWebView: KatexWebView = {
         let katexWebView = KatexWebView()
-        katexWebView.$status.sink { [weak self] status in
-            switch status {
-            case .idle:
-                self?.status = .idle
-            case .loading:
-                self?.status = .loading
-            case .finished:
-                self?.status = .finished
-                self?.setNeedsLayout()
-                self?.invalidateIntrinsicContentSize()
-            case .error(let message):
-                self?.status = .error(message: message)
-            }
-        }.store(in: &cancellables)
         return katexWebView
-    }()
-
-    private lazy var scrollView: UIScrollView = {
-        let scrollView = UIScrollView(frame: .zero)
-        scrollView.bounces = false
-        scrollView.showsHorizontalScrollIndicator = false
-        scrollView.showsVerticalScrollIndicator = false
-        return scrollView
     }()
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
         self.clipsToBounds = true
-        self.addSubview(self.scrollView)
-        self.scrollView.addSubview(self.katexWebView)
+        self.addSubview(katexWebView)
+        katexWebView.takeSnapshotCompletion = { [weak self] image in
+            guard let self else { return }
+            takeSnapshotCompletion?(image)
+        }
     }
 
     public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    public convenience init(frame: CGRect = .zero, latex: String, maxSize: CGSize? = nil, options: [Katex.Key : Any]? = nil) {
-        self.init(frame: frame)
+    public convenience init(config: KatexViewConfig, latex: String) {
+        self.init(frame: .zero)
+        self.config = config
         self.latex = latex
-        if let options = options {
-            self.options = options
-        }
-        if let maxSize = maxSize {
-            self.maxSize = maxSize
-        }
         reload()
-    }
-
-    deinit {
-        for cancellable in cancellables {
-            cancellable.cancel()
-        }
-    }
-
-    public override func layoutSubviews() {
-        if case .finished = status {
-            let contentSize = katexWebView.intrinsicContentSize
-            katexWebView.frame.size = contentSize
-            scrollView.contentSize = contentSize
-            scrollView.isScrollEnabled = frame.width < contentSize.width || frame.height < contentSize.height
-            scrollView.frame.size = CGSize(width: min(frame.width, contentSize.width), height: min(frame.height, contentSize.height))
-        }
     }
     
     public func reload() {
-        katexWebView.frame = CGRect(origin: .zero, size: maxSize)
-        katexWebView.loadLatex(latex, options: options, customCss: customCss)
+        katexWebView.frame = CGRect(origin: .zero, size: CGSize(width: maxWidth, height: 1))
+        katexWebView.loadLatex(latex, options: config.options, customCss: config.customCss)
+        print("enddddd:\(Date().timeIntervalSince1970)")
     }
 }
 
+public class KatexWebView: WKWebView, WKUIDelegate, WKNavigationDelegate {
 
-extension KatexView {
-    private class KatexWebView: WKWebView, WKUIDelegate, WKNavigationDelegate {
+    enum KatexWebViewStatus {
+        case loading
+        case finished
+        case idle
+        case error(message: String)
+    }
+    
+    var image: UIImage?
+    
+    var takeSnapshotCompletion: ((UIImage?) -> Void)?
 
-        enum KatexWebViewStatus {
-            case loading
-            case finished
-            case idle
-            case error(message: String)
+//        @Published
+    var status: KatexWebViewStatus = .idle
+
+    private static var templateHtmlPath: String = {
+        guard let path = Bundle.katexBundle?.path(forResource: "katex/index", ofType: "html") else {
+            fatalError("[KatexUtils] Can not find template HTML file.")
         }
+        return path
+    }()
 
-        @Published
-        var status: KatexWebViewStatus = .idle
-
-        var contentSize: CGSize = .zero {
-            didSet {
-                invalidateIntrinsicContentSize()
-            }
+    private static var templateHtmlString: String = {
+        do {
+            let templateHtmlString = try String(contentsOfFile: templateHtmlPath, encoding: .utf8)
+            return templateHtmlString
+        } catch {
+            fatalError("[KatexUtils] Open template HTML file failed.")
         }
-
-        private static var templateHtmlPath: String = {
-            guard let path = Bundle.katexBundle?.path(forResource: "katex/index", ofType: "html") else {
-                fatalError("[KatexUtils] Can not find template HTML file.")
-            }
-            return path
-        }()
-
-        private static var templateHtmlString: String = {
-            do {
-                let templateHtmlString = try String(contentsOfFile: templateHtmlPath, encoding: .utf8)
-                return templateHtmlString
-            } catch {
-                fatalError("[KatexUtils] Open template HTML file failed.")
-            }
-        }()
-
-        override var intrinsicContentSize: CGSize {
-            return contentSize
-        }
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            let script = """
-                [document.body.scrollWidth > document.body.clientWidth ? document.body.scrollWidth : document.getElementById('tex').getBoundingClientRect().width,
-                 document.getElementsByTagName('html')[0].getBoundingClientRect().height]
-            """
-            webView.evaluateJavaScript(script) { (result, error) in
-                if let result = result as? Array<CGFloat> {
-                    self.contentSize = CGSize(width: result[0], height: result[1])
-                    self.status = .finished
+    }()
+    
+    public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        print("endddd:\(Date().timeIntervalSince1970)")
+        let script = """
+            [document.body.scrollWidth > document.body.clientWidth ? document.body.scrollWidth : document.getElementById('tex').getBoundingClientRect().width,
+             document.getElementsByTagName('html')[0].getBoundingClientRect().height]
+        """
+        webView.evaluateJavaScript(script) { [weak self] (result, error) in
+            guard let self else { return }
+            if let result = result as? Array<CGFloat> {
+                handleWebView(aWebView: webView, frame: CGRect(x: 0, y: 0, width: result[0], height: result[1]))
+                print("enddd:\(Date().timeIntervalSince1970)")
+                self.status = .finished
+                let configuration = WKSnapshotConfiguration()
+                webView.takeSnapshot(with: configuration) { [weak self] image, error in
+                    guard let self else { return }
+                    print("enddddddd:\(Date().timeIntervalSince1970)")
+                    takeSnapshotCompletion?(image)
+//                    self.image = image
+                    
                 }
             }
         }
-
-        init() {
-            super.init(frame: .zero, configuration: WKWebViewConfiguration())
-
-            scrollView.isScrollEnabled = false
-            scrollView.isUserInteractionEnabled = false
-            scrollView.bounces = false
-            scrollView.showsVerticalScrollIndicator = false
-            scrollView.showsHorizontalScrollIndicator = false
-
-            navigationDelegate = self
-
-            isOpaque = false
-            backgroundColor = .clear
+    }
+    
+    func handleWebView(aWebView: WKWebView, frame: CGRect) {
+        aWebView.frame = frame;       // Set the scrollView contentHeight back to the frame itself.
+        guard var selfFrame = self.superview?.frame else {
+            return
         }
+        selfFrame.size = aWebView.frame.size;
+        self.superview?.frame = selfFrame;
+    }
 
-        required init?(coder: NSCoder) {
-            fatalError("init(coder:) has not been implemented")
-        }
+    init() {
+        super.init(frame: .zero, configuration: WKWebViewConfiguration())
 
-        func loadLatex(_ latex: String, options: [Katex.Key : Any]? = nil, customCss: String? = nil) {
-            do {
-                let htmlString = try getHtmlString(latex: latex, options: options, customCss: customCss)
-                status = .loading
-                loadHTMLString(htmlString, baseURL: URL(fileURLWithPath: Self.templateHtmlPath))
-            } catch Katex.KatexError.parseError(let message, _) {
-                status = .error(message: message)
-            } catch {
-                status = .error(message: "Can not load LaTeX formula.")
-            }
-        }
+        scrollView.isScrollEnabled = false
+        scrollView.isUserInteractionEnabled = false
+        scrollView.bounces = false
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.showsHorizontalScrollIndicator = false
 
-        func getHtmlString(latex: String, options: [Katex.Key : Any]? = nil, customCss: String? = nil) throws -> String {
-            var htmlString = Self.templateHtmlString
-            let insertHtml = try KatexRenderer.renderToString(latex: latex, options: options)
-            htmlString = htmlString.replacingOccurrences(of: "CUSTOM_CSS", with: customCss ?? "")
-            htmlString = htmlString.replacingOccurrences(of: "$LATEX$", with: insertHtml)
-            return htmlString
+        navigationDelegate = self
+
+        isOpaque = false
+        backgroundColor = .clear
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func loadLatex(_ latex: String, options: [Katex.Key : Any]? = nil, customCss: String? = nil) {
+        do {
+            let htmlString = try getHtmlString(latex: latex, options: options, customCss: customCss)
+            status = .loading
+            loadHTMLString(htmlString, baseURL: URL(fileURLWithPath: Self.templateHtmlPath))
+        } catch Katex.KatexError.parseError(let message, _) {
+            status = .error(message: message)
+        } catch {
+            status = .error(message: "Can not load LaTeX formula.")
         }
+    }
+
+    func getHtmlString(latex: String, options: [Katex.Key : Any]? = nil, customCss: String? = nil) throws -> String {
+        var htmlString = Self.templateHtmlString
+        let insertHtml = try KatexRenderer.renderToString(latex: latex, options: options)
+        htmlString = htmlString.replacingOccurrences(of: "CUSTOM_CSS", with: customCss ?? "")
+        htmlString = htmlString.replacingOccurrences(of: "$LATEX$", with: insertHtml)
+        return htmlString
     }
 }
