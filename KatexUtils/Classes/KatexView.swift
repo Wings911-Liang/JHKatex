@@ -28,8 +28,17 @@ public final class KatexView : UIView {
     }
     
     public var maxWidth: CGFloat = 0.0
+    
+    public var customCss = ".katex { color: #212121; font-size: 16px; }"
 
-    public var takeSnapshotCompletion: ((UIImage?) -> Void)?
+    public var takeSnapshotCompletion: ((UIImage?) -> Void)? {
+        didSet {
+            katexWebView.takeSnapshotCompletion = { [weak self] image in
+                guard let self else { return }
+                takeSnapshotCompletion?(image)
+            }
+        }
+    }
     
     public var config: KatexViewConfig!
 
@@ -42,10 +51,6 @@ public final class KatexView : UIView {
         super.init(frame: frame)
         self.clipsToBounds = true
         self.addSubview(katexWebView)
-        katexWebView.takeSnapshotCompletion = { [weak self] image in
-            guard let self else { return }
-            takeSnapshotCompletion?(image)
-        }
     }
 
     public required init?(coder: NSCoder) {
@@ -61,8 +66,9 @@ public final class KatexView : UIView {
     
     public func reload() {
         katexWebView.frame = CGRect(origin: .zero, size: CGSize(width: maxWidth, height: 1))
-        katexWebView.loadLatex(latex, options: config.options, customCss: config.customCss)
-        print("enddddd:\(Date().timeIntervalSince1970)")
+        katexWebView.loadLatex(latex, options: config.options, customCss: customCss) { [weak self] in
+            self?.takeSnapshotCompletion?(nil)
+        }
     }
 }
 
@@ -99,7 +105,6 @@ public class KatexWebView: WKWebView, WKUIDelegate, WKNavigationDelegate {
     }()
     
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        print("endddd:\(Date().timeIntervalSince1970)")
         let script = """
             [document.body.scrollWidth > document.body.clientWidth ? document.body.scrollWidth : document.getElementById('tex').getBoundingClientRect().width,
              document.getElementsByTagName('html')[0].getBoundingClientRect().height]
@@ -107,16 +112,12 @@ public class KatexWebView: WKWebView, WKUIDelegate, WKNavigationDelegate {
         webView.evaluateJavaScript(script) { [weak self] (result, error) in
             guard let self else { return }
             if let result = result as? Array<CGFloat> {
-                handleWebView(aWebView: webView, frame: CGRect(x: 0, y: 0, width: result[0], height: result[1]))
-                print("enddd:\(Date().timeIntervalSince1970)")
+                handleWebView(aWebView: webView, frame: CGRect(x: 0, y: 0, width: result[0], height: result[1] + 1))
                 self.status = .finished
                 let configuration = WKSnapshotConfiguration()
                 webView.takeSnapshot(with: configuration) { [weak self] image, error in
                     guard let self else { return }
-                    print("enddddddd:\(Date().timeIntervalSince1970)")
                     takeSnapshotCompletion?(image)
-//                    self.image = image
-                    
                 }
             }
         }
@@ -150,15 +151,17 @@ public class KatexWebView: WKWebView, WKUIDelegate, WKNavigationDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func loadLatex(_ latex: String, options: [Katex.Key : Any]? = nil, customCss: String? = nil) {
+    func loadLatex(_ latex: String, options: [Katex.Key : Any]? = nil, customCss: String? = nil, errorBlock: () -> Void) {
         do {
             let htmlString = try getHtmlString(latex: latex, options: options, customCss: customCss)
             status = .loading
             loadHTMLString(htmlString, baseURL: URL(fileURLWithPath: Self.templateHtmlPath))
         } catch Katex.KatexError.parseError(let message, _) {
             status = .error(message: message)
+            errorBlock()
         } catch {
             status = .error(message: "Can not load LaTeX formula.")
+            errorBlock()
         }
     }
 
