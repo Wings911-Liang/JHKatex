@@ -104,7 +104,12 @@ public class KatexWebView: WKWebView, WKUIDelegate, WKNavigationDelegate {
         }
     }()
     
+    public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
+        takeSnapshotCompletion?(nil)
+    }
+    
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard let takeSnapshotCompletion else { return }
         let script = """
             [document.body.scrollWidth > document.body.clientWidth ? document.body.scrollWidth : document.getElementById('tex').getBoundingClientRect().width,
              document.getElementsByTagName('html')[0].getBoundingClientRect().height]
@@ -117,7 +122,7 @@ public class KatexWebView: WKWebView, WKUIDelegate, WKNavigationDelegate {
                 let configuration = WKSnapshotConfiguration()
                 webView.takeSnapshot(with: configuration) { [weak self] image, error in
                     guard let self else { return }
-                    takeSnapshotCompletion?(image)
+                    takeSnapshotCompletion(image)
                 }
             }
         }
